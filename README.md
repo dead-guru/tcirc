@@ -2,6 +2,7 @@
 
 Scrape telegram channels and send message to irc channel.
 
+**Warning!!!** Very ugly code!
 
 ## Setup:
 1) Install deps using `pip3 install -r requirements.txt`
