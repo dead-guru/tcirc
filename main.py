@@ -7,19 +7,20 @@ import time
 import random
 import re
 import os
+from functools import reduce
 
 from telethon.sync import TelegramClient, events
 from telethon.tl.functions.messages import (GetHistoryRequest)
 
 ##irc
 server = os.environ.get('SERVER_URL', "irc.dead.guru")
-port = os.environ.get('PORT', "6697")
+port = int(os.environ.get('PORT', 6697))
 channel = os.environ.get('CHANNEL_NAME', "#news")
 botnick = os.environ.get('BOT_NICK', "news_bot")
 delim = "________________"
 
 ##telegram
-api_id = os.environ.get('API_ID', 10000001) ## Todo use env variables or configuration file
+api_id = os.environ.get('API_ID', 10000001)
 api_hash = os.environ.get('API_HASH', 'api_hash')
 
 channels = {
@@ -85,7 +86,7 @@ def disarm_hashtags(data):
 
 def sanitize_tg_message(data):
     # sequentially apply all the sanitizer functions
-    return reduce(remove_emojis, disarm_hashtags, remove_linebreaks, remove_urls, data)
+    return reduce(lambda res, f: f(res), [remove_emojis, disarm_hashtags, remove_linebreaks, remove_urls], data)
 ## ----- END SANITIZER -----
 
 #NO OP
