@@ -1,23 +1,26 @@
 import os
 import pickle
-from telethon.sync import TelegramClient, events
-from telethon.tl.functions.messages import (GetHistoryRequest)
 import irc.client
 import sys
 import ssl
 import time
 import random
+import re
+import os
+
+from telethon.sync import TelegramClient, events
+from telethon.tl.functions.messages import (GetHistoryRequest)
 
 ##irc
-server = "irc.dead.guru" 
-port = 6697
-channel = "#news"
-botnick = "news_bot"
+server = os.environ.get('SERVER_URL', "irc.dead.guru")
+port = os.environ.get('PORT', "6697")
+channel = os.environ.get('CHANNEL_NAME', "#news")
+botnick = os.environ.get('BOT_NICK', "news_bot")
 delim = "________________"
 
 ##telegram
-api_id = 10000001 ## Todo use env variables or configuration file
-api_hash = 'api_hash'
+api_id = os.environ.get('API_ID', 10000001) ## Todo use env variables or configuration file
+api_hash = os.environ.get('API_HASH', 'api_hash')
 
 channels = {
     't.me/operativnoZSU': {'url': 't.me/operativnoZSU', 'last': 0, 'peer': None},
@@ -44,8 +47,8 @@ def resolve_peer(c):
     channels[c]['peer'] = pickle.dumps(peer)
     return peer
 
-
-import re
+## ----- SANITIZER -----
+# TODO: convert it in a single class/function/decorator/whatever
 def remove_emojis(data):
     emoj = re.compile("["
         u"\U0001F600-\U0001F64F"  # emoticons
@@ -58,7 +61,7 @@ def remove_emojis(data):
         u"\U000024C2-\U0001F251"
         u"\U0001f926-\U0001f937"
         u"\U00010000-\U0010ffff"
-        u"\u2640-\u2642" 
+        u"\u2640-\u2642"
         u"\u2600-\u2B55"
         u"\u200d"
         u"\u23cf"
@@ -69,14 +72,35 @@ def remove_emojis(data):
                         "]+", re.UNICODE)
     return re.sub(emoj, '', data)
 
-symbol_size = lambda s : sys.getsizeof(str(s).encode("utf-8"))
-check_the_limit = lambda a, l : symbol_size(a) < l
-w = ' '
+def remove_urls(data):
+    return re.sub(r'http\S+', '', data)
+
+def remove_linebreaks(data):
+    return data.replace("\n", " ")
+
+def disarm_hashtags(data):
+    '''TG Hashtags are being mistaken as an IRC channels'''
+    # with r'(?:^|\W)#(\S+)' we loose the whitespace, that's odd
+    return re.sub(r'(^|\W)#(\S+)', r'\g<1>tag:\g<2>', data)
+
+def sanitize_tg_message(data):
+    # sequentially apply all the sanitizer functions
+    return reduce(remove_emojis, disarm_hashtags, remove_linebreaks, remove_urls, data)
+## ----- END SANITIZER -----
+
+#NO OP
+def nop():
+    pass
 
 def spUtf8(string, byte_limit):
-    limit = byte_limit - symbol_size('[xx]: ')
+    symbol_size = lambda s : sys.getsizeof(str(s).encode("utf-8"))
+    check_the_limit = lambda a, l : symbol_size(a) < l
+    w = ' '
+
+    limit = byte_limit - symbol_size('[xx]: ') #spare byte limit minus the preambple of each message
     calibrate = lambda a : check_the_limit(a, limit)
 
+    # message fits in one IRC packet
     if calibrate(string):
         return [string]
 
@@ -84,6 +108,7 @@ def spUtf8(string, byte_limit):
     strings = []
     words = str.split(string)
 
+    # split incomming text into an aray of IRC-fitted messages
     for word in words:
         if calibrate(tmpStr + w + word):
             tmpStr += (w + word)
@@ -109,13 +134,15 @@ def handle(connection):
                         hash=0))
         if chan['last'] != posts.messages[0].id:
             chan['last'] = posts.messages[0].id
-            message = remove_emojis(re.sub(r'http\S+', '', posts.messages[0].message.replace("\n", " ")))
+
+            # remove links, remove linebreaks, remove emojis
+            message = sanitize_tg_message(posts.messages[0].message)
             if len(message) != 0:
                 connection.privmsg(channel, chan['url'] + ":")
                 for line in spUtf8(message, 470):
                     if line is not None:
                         connection.privmsg(channel, line)
-                    
+
                 connection.privmsg(channel, delim)
     connection.quit("done")
 
